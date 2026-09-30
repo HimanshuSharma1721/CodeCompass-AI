@@ -1,0 +1,30 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Environment (keep the example file if you make one)
+.env
+.env.*
+!.env.example
+
+# RAG generated data
+backend/data/uploads/
+backend/data/faiss_index/
+
+# Logs
+*.log
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# React
+node_modules/
+dist/
+build/
