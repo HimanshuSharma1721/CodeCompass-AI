@@ -1,5 +1,9 @@
 from langchain_community.embeddings import FastEmbedEmbeddings
 
+# One shared model per process. Every EmbeddingManager() reuses it,
+# so the model is only loaded into memory once.
+_MODEL_CACHE = {}
+
 
 class EmbeddingManager:
     """
@@ -11,13 +15,17 @@ class EmbeddingManager:
         model_name: str = "BAAI/bge-small-en-v1.5"
     ):
 
-        print(f"Loading embedding model: {model_name}")
+        if model_name not in _MODEL_CACHE:
 
-        self.embedding_model = FastEmbedEmbeddings(
-            model_name=model_name
-        )
+            print(f"Loading embedding model: {model_name}")
 
-        print("Embedding model loaded successfully!")
+            _MODEL_CACHE[model_name] = FastEmbedEmbeddings(
+                model_name=model_name
+            )
+
+            print("Embedding model loaded successfully!")
+
+        self.embedding_model = _MODEL_CACHE[model_name]
 
     def get_embeddings(self):
         return self.embedding_model

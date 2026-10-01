@@ -1,3 +1,4 @@
+import gc
 from pathlib import Path
 
 from app.rag.loader import load_repository
@@ -15,6 +16,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 # CodeCompass-AI/backend/data/faiss_index
 FAISS_PATH = BASE_DIR / "data" / "faiss_index"
 
+# Keeps memory low on small servers
+BATCH_SIZE = 32
+MAX_CHUNKS = 1500
+
 
 def build_index(repo_path):
 
@@ -31,16 +36,32 @@ def build_index(repo_path):
 
     print(f"Created {len(chunks)} chunks")
 
+    if not chunks:
+        raise ValueError("No readable code files found in this ZIP.")
 
+    if len(chunks) > MAX_CHUNKS:
+        print(f"Too many chunks, keeping the first {MAX_CHUNKS}")
+        chunks = chunks[:MAX_CHUNKS]
+
+
+    # Shared model (loaded only once per server)
     embedding_model = EmbeddingManager().get_embeddings()
 
 
     print("Creating FAISS index...")
 
-    vector_db = FAISS.from_documents(
-        chunks,
-        embedding_model
-    )
+    vector_db = None
+
+    for i in range(0, len(chunks), BATCH_SIZE):
+
+        batch = chunks[i:i + BATCH_SIZE]
+
+        if vector_db is None:
+            vector_db = FAISS.from_documents(batch, embedding_model)
+        else:
+            vector_db.add_documents(batch)
+
+        gc.collect()
 
 
     vector_db.save_local(str(FAISS_PATH))

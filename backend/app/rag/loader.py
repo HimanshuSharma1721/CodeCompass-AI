@@ -7,8 +7,15 @@ from langchain_core.documents import Document
 IGNORE_DIRS = {
     ".git",
     ".venv",
+    "venv",
+    "env",
     "__pycache__",
+    "__MACOSX",
     "node_modules",
+    ".next",
+    ".idea",
+    ".vscode",
+    "coverage",
     "dist",
     "build"
 }
@@ -24,6 +31,19 @@ SUPPORTED_EXTENSIONS = {
     ".json",
     ".md"
 }
+
+# Generated or noisy files that add no value to the index
+IGNORE_FILES = {
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "tsconfig.tsbuildinfo",
+}
+
+# Skip very large files (minified bundles, data dumps)
+MAX_FILE_BYTES = 150_000
+
+
 def get_supported_files(project_path: str) -> List[Path]:
     """
     Recursively scan a project directory and return all supported source files.
@@ -39,15 +59,34 @@ def get_supported_files(project_path: str) -> List[Path]:
         if file_path.is_dir():
             continue
 
-        # Skip ignored directories
-        if any(part in IGNORE_DIRS for part in file_path.parts):
+        # Check ignored directories relative to the repo root,
+        # so folders above the repo (like 'build') don't matter
+        relative_parts = file_path.relative_to(project_path).parts
+
+        if any(part in IGNORE_DIRS for part in relative_parts):
+            continue
+
+        # Skip lock files and minified/source-map files
+        name = file_path.name.lower()
+
+        if name in IGNORE_FILES or name.endswith((".min.js", ".map")):
             continue
 
         # Keep only supported file extensions
-        if file_path.suffix.lower() in SUPPORTED_EXTENSIONS:
-            supported_files.append(file_path)
+        if file_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            continue
+
+        # Skip huge files
+        try:
+            if file_path.stat().st_size > MAX_FILE_BYTES:
+                continue
+        except OSError:
+            continue
+
+        supported_files.append(file_path)
 
     return supported_files
+
 
 def read_file(file_path: Path) -> str:
     """
@@ -63,7 +102,8 @@ def read_file(file_path: Path) -> str:
     except Exception as e:
         print(f"Error reading {file_path}: {e}")
         return ""
-    
+
+
 def load_repository(project_path: str) -> List[Document]:
     """
     Load all supported source files from a repository
@@ -95,6 +135,7 @@ def load_repository(project_path: str) -> List[Document]:
         documents.append(document)
 
     return documents
+
 
 if __name__ == "__main__":
 
