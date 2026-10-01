@@ -6,6 +6,7 @@ from fastapi import (
     File,
     HTTPException,
 )
+from google.genai import errors
 
 from app.api.schemas import (
     ChatRequest,
@@ -21,8 +22,12 @@ from app.rag.memory import ConversationMemory
 
 router = APIRouter()
 
+# Same base folder the retriever uses, so paths don't depend on
+# where the server is started from
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+UPLOAD_DIR = BASE_DIR / "data" / "uploads"
 
-# Load once when server starts
+# Load once when server starts (starts empty if no index exists yet)
 retriever = CodeRetriever()
 llm = GeminiClient()
 memory = ConversationMemory()
@@ -40,6 +45,14 @@ def chat(request: ChatRequest):
 
     docs = retriever.search(request.question)
 
+    # No index yet, or nothing found: ask for an upload instead of
+    # sending an empty context to Gemini
+    if not docs:
+        return ChatResponse(
+            answer="I don't have a repository to look at yet. "
+                   "Please upload a ZIP file of your project first."
+        )
+
     memory.add_user_message(request.question)
 
     prompt = PromptBuilder.build_prompt(
@@ -48,7 +61,13 @@ def chat(request: ChatRequest):
         history=memory.get_history(),
     )
 
-    answer = llm.generate(prompt)
+    try:
+        answer = llm.generate(prompt)
+    except errors.APIError:
+        raise HTTPException(
+            status_code=503,
+            detail="AI is busy right now, please try again in a few seconds.",
+        )
 
     memory.add_ai_message(answer)
 
@@ -67,10 +86,10 @@ async def upload_repository(file: UploadFile = File(...)):
             detail="Only ZIP files are allowed."
         )
 
-    upload_path = Path("backend/data/uploads")
-    upload_path.mkdir(parents=True, exist_ok=True)
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-    zip_file = upload_path / file.filename
+    # .name strips any folder parts from the uploaded filename
+    zip_file = UPLOAD_DIR / Path(file.filename).name
 
     with open(zip_file, "wb") as buffer:
         buffer.write(await file.read())
@@ -78,8 +97,8 @@ async def upload_repository(file: UploadFile = File(...)):
     # Build FAISS index
     result = UploadService.process_zip(zip_file)
 
-    # Reload retriever so it uses the newly created index
-    global retriever
-    retriever = CodeRetriever()
+    # Reload the index into the existing retriever
+    # (no need to reload the embedding model again)
+    retriever.load()
 
     return result
