@@ -16,9 +16,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 # CodeCompass-AI/backend/data/faiss_index
 FAISS_PATH = BASE_DIR / "data" / "faiss_index"
 
-# Keeps memory low on small servers
+# Keeps memory use and API calls low on small servers
 BATCH_SIZE = 32
-MAX_CHUNKS = 1500
+MAX_CHUNKS = 800
 
 
 def build_index(repo_path):
@@ -44,7 +44,7 @@ def build_index(repo_path):
         chunks = chunks[:MAX_CHUNKS]
 
 
-    # Shared model (loaded only once per server)
+    # Shared embedding model (one instance per server)
     embedding_model = EmbeddingManager().get_embeddings()
 
 
@@ -63,6 +63,8 @@ def build_index(repo_path):
 
         gc.collect()
 
+
+    FAISS_PATH.mkdir(parents=True, exist_ok=True)
 
     vector_db.save_local(str(FAISS_PATH))
 
