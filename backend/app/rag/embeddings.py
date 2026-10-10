@@ -9,7 +9,11 @@ from langchain_core.embeddings import Embeddings
 load_dotenv()
 
 MODEL_NAME = "gemini-embedding-001"
-API_BATCH = 32
+API_BATCH = 16
+
+# Free tier allows 30,000 tokens/minute; keep a safety margin
+TOKENS_PER_MINUTE = 24_000
+RETRY_WAITS = [15, 30, 45]
 
 
 class GeminiEmbeddings(Embeddings):
@@ -24,10 +28,32 @@ class GeminiEmbeddings(Embeddings):
 
         self.client = genai.Client(api_key=api_key)
         self.model_name = model_name
+        self._sent = []  # (timestamp, estimated_tokens)
+
+    def _throttle(self, tokens):
+        """Wait if sending this batch would exceed the per-minute budget."""
+
+        while True:
+            now = time.time()
+            self._sent = [(t, n) for t, n in self._sent if now - t < 60]
+            used = sum(n for _, n in self._sent)
+
+            if not self._sent or used + tokens <= TOKENS_PER_MINUTE:
+                break
+
+            wait = 60 - (now - self._sent[0][0]) + 0.5
+            print(f"Pacing embeddings, waiting {wait:.0f}s...")
+            time.sleep(max(wait, 1))
+
+        self._sent.append((time.time(), tokens))
 
     def _embed(self, texts, task_type):
 
-        for attempt in range(5):
+        # Rough estimate: about 3 characters per token for code
+        tokens = sum(len(t) for t in texts) // 3 + 1
+        self._throttle(tokens)
+
+        for attempt in range(len(RETRY_WAITS) + 1):
             try:
                 result = self.client.models.embed_content(
                     model=self.model_name,
@@ -37,13 +63,22 @@ class GeminiEmbeddings(Embeddings):
                 return [e.values for e in result.embeddings]
 
             except errors.APIError as e:
-                # Retry only on rate limit (429) or Google-side errors (5xx)
-                if e.code == 429 or (e.code and e.code >= 500):
-                    time.sleep(2 ** attempt)
-                else:
+                retryable = e.code == 429 or (e.code and e.code >= 500)
+
+                if not retryable:
                     raise
 
-        raise RuntimeError("Embedding service is busy, please try again.")
+                if attempt == len(RETRY_WAITS):
+                    break
+
+                wait = RETRY_WAITS[attempt]
+                print(f"Embedding API error {e.code}, retrying in {wait}s")
+                time.sleep(wait)
+
+        raise RuntimeError(
+            "The embedding service is busy or rate limited. "
+            "Please try again in a minute."
+        )
 
     def embed_documents(self, texts):
 

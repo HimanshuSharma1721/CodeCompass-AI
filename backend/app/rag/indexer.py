@@ -17,8 +17,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 FAISS_PATH = BASE_DIR / "data" / "faiss_index"
 
 # Keeps memory use and API calls low on small servers
-BATCH_SIZE = 32
-MAX_CHUNKS = 800
+BATCH_SIZE = 16
+MAX_CHUNKS = 80
 
 
 def build_index(repo_path):
@@ -40,8 +40,11 @@ def build_index(repo_path):
         raise ValueError("No readable code files found in this ZIP.")
 
     if len(chunks) > MAX_CHUNKS:
-        print(f"Too many chunks, keeping the first {MAX_CHUNKS}")
-        chunks = chunks[:MAX_CHUNKS]
+        raise ValueError(
+            f"This project is too large for the free demo "
+            f"({len(chunks)} chunks, limit {MAX_CHUNKS}). "
+            f"Please upload a smaller project."
+        )
 
 
     # Shared embedding model (one instance per server)
